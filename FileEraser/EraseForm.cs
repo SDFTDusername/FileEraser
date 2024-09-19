@@ -1,7 +1,5 @@
-﻿using System.Collections;
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
-using System.IO;
 using System.Security;
 
 namespace FileEraser
