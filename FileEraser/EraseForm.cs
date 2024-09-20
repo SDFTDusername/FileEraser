@@ -1,5 +1,5 @@
 ﻿using System.ComponentModel;
-using System.Diagnostics;
+using System.Media;
 using System.Security;
 
 namespace FileEraser
@@ -10,6 +10,9 @@ namespace FileEraser
 
         private long fileCount = 0;
         private long totalSize = 0;
+
+        private long failedFiles = 0;
+        private long failedFolders = 0;
 
         private Queue<long> size = new Queue<long>();
 
@@ -28,13 +31,18 @@ namespace FileEraser
         {
             this.fileNames = fileNames;
 
-            if (MessageBox.Show("Once the file data is erased, you cannot recover it. Do you want to continue?\nFile names, file sizes, and metadata may still be recoverable.\nInaccesible or readonly files and folders are ignored.", "Erase files?", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            if (MessageBox.Show("Once the file(s) are permanently deleted, you can no longer recover them. Metadata may still be recoverable.\r\nDo you want to continue?", "Erase file(s)?", MessageBoxButtons.YesNo, MessageBoxIcon.None) != DialogResult.Yes)
             {
                 Cancelled = true;
+                Close();
                 return;
             }
 
             InitializeComponent();
+
+            updateDiscoverStatus();
+            Text = $"Discovering file(s)...";
+            progressBar.Style = ProgressBarStyle.Marquee;
         }
 
         private void EraseForm_Load(object sender, EventArgs e)
@@ -47,6 +55,22 @@ namespace FileEraser
             bgWorker.RunWorkerCompleted += discoverBgWorker_RunWorkerCompleted;
 
             bgWorker.RunWorkerAsync();
+        }
+
+        private void checkFailed(string action, string pastTenseWord)
+        {
+            List<string> items = new List<string>();
+
+            if (failedFiles > 0) items.Add($"{failedFiles:n0} file{(failedFiles == 1 ? "" : "s")}");
+            if (failedFolders > 0) items.Add($"{failedFolders:n0} folder{(failedFolders == 1 ? "" : "s")}");
+
+            if (items.Count > 0)
+                MessageBox.Show($"Couldn't discover {action} {string.Join(" and ", fileNames)}", $"{pastTenseWord} file{(fileNames.Length == 1 ? "" : "s")}", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        private void updateDiscoverStatus()
+        {
+            statusLabel.Text = $"Discovered {fileCount:n0} file{(fileCount == 1 ? "" : "s")}... ({Format.ByteSize(totalSize)})";
         }
 
         private void discoverBgWorker_DoWork(object? sender, DoWorkEventArgs e)
@@ -80,15 +104,18 @@ namespace FileEraser
                     if (!fileStream.CanWrite)
                     {
                         fileStream.Close();
+                        ++failedFiles;
                         return;
                     }
                 }
                 catch (UnauthorizedAccessException)
                 {
+                    ++failedFiles;
                     return;
                 }
                 catch (IOException)
                 {
+                    ++failedFiles;
                     return;
                 }
 
@@ -105,25 +132,48 @@ namespace FileEraser
 
             foreach (string path in fileNames)
             {
-                try {
-                    if (Directory.Exists(path))
-                        addFolder(new DirectoryInfo(path));
-                    else if (File.Exists(path))
+                if (File.Exists(path))
+                {
+                    try
+                    {
                         addFile(new FileInfo(path));
-                } catch (SecurityException) { }
-                catch (UnauthorizedAccessException) { }
+                    }
+                    catch (SecurityException) { ++failedFiles; }
+                    catch (UnauthorizedAccessException) { ++failedFiles; }
+                }
+                else if (Directory.Exists(path))
+                {
+                    try
+                    {
+                        addFolder(new DirectoryInfo(path));
+                    }
+                    catch (SecurityException) { ++failedFolders; }
+                    catch (UnauthorizedAccessException) { ++failedFolders; }
+                }
             }
         }
 
         private void discoverBgWorker_ProgressChanged(object? sender, ProgressChangedEventArgs e)
         {
-            statusLabel.Text = $"Discovered {fileCount:n0} file{(fileCount == 1 ? "" : "s")}... ({Format.ByteSize(totalSize)})";
+            updateDiscoverStatus();
+        }
+
+        private void updateEraseStatus()
+        {
+            statusLabel.Text = $"Erased {erasedFileCount:n0} out of {fileCount:n0} file{(fileCount == 1 ? "" : "s")}... ({Format.ByteSize(totalSize)} left)";
+            progressBar.Value = (int)((double)erasedFileCount / fileCount * 1000d);
         }
 
         private void discoverBgWorker_RunWorkerCompleted(object? sender, RunWorkerCompletedEventArgs e)
         {
-            statusLabel.Text = $"Erased 0 out of {fileCount:n0} file{(fileCount == 1 ? "" : "s")}... ({Format.ByteSize(totalSize)} left)";
+            checkFailed("discover", "Discovered");
+
+            failedFiles = 0;
+            failedFolders = 0;
+
+            updateEraseStatus();
             progressBar.Style = ProgressBarStyle.Blocks;
+            Text = $"Erasing file{(fileCount == 1 ? "" : "s")}...";
 
             BackgroundWorker bgWorker = new BackgroundWorker();
             bgWorker.WorkerReportsProgress = true;
@@ -142,136 +192,53 @@ namespace FileEraser
             if (bgWorker == null)
                 return;
 
-            byte[] bytes8 = { 0, 0, 0, 0, 0, 0, 0, 0 };
-
             while (queue.Count > 0)
             {
                 FileSystemInfo fileSystemInfo = queue.Dequeue();
 
                 if (fileSystemInfo is FileInfo)
                 {
-                    //try
-                    //{
-                        FileInfo fileInfo = (FileInfo)fileSystemInfo;
-                        FileStream fileStream = File.Open(fileInfo.FullName, FileMode.Open);
+                    FileInfo fileInfo = (FileInfo)fileSystemInfo;
 
-                        if (fileStream.CanWrite)
-                        {
-                            long bytes8Count = fileInfo.Length / 8;
-                            byte byteCount = (byte)(fileInfo.Length % 8);
+                    bool success = Erase.FillFileWithZeros(fileInfo, changeSize);
 
-                            for (long i = 0; i < bytes8Count; ++i)
-                                fileStream.Write(bytes8, 0, 8);
+                    if (changeName)
+                        Erase.RenameFileName(fileInfo, changeNameLength);
 
-                            for (byte i = 0; i < byteCount; ++i)
-                                fileStream.WriteByte(0);
-                            
-                            fileStream.Close();
+                    if (success)
+                    {
+                        fileInfo.Delete();
 
-                            if (changeSize)
-                            {
-                                fileStream = File.Open(fileInfo.FullName, FileMode.Truncate);
-                                fileStream.WriteByte(0);
-                                fileStream.Close();
-                            }
-
-                            if (changeName)
-                            {
-                                int attempt = 0;
-                                while (true)
-                                {
-                                    string suffix = (attempt == 0) ? "" : attempt.ToString();
-
-                                    string newPath = Path.Join(fileInfo.DirectoryName, new string('a', fileInfo.Name.Length) + suffix);
-                                    if (!File.Exists(newPath))
-                                    {
-                                        fileInfo.MoveTo(newPath);
-                                        if (!changeNameLength) break;
-                                    }
-                                    else
-                                    {
-                                        ++attempt;
-                                        continue;
-                                    }
-
-                                    if (changeNameLength)
-                                    {
-                                        newPath = Path.Join(fileInfo.DirectoryName, "a" + suffix);
-
-                                        if (!File.Exists(newPath))
-                                        {
-                                            fileInfo.MoveTo(newPath);
-                                            break;
-                                        }
-                                        else
-                                            ++attempt;
-                                    }
-                                }
-                            }
-
-                            //fileInfo.Delete();
-
-                            ++erasedFileCount;
-                            totalSize -= size.Dequeue();
-                            bgWorker.ReportProgress(0);
-                        }
-                    //}
-                    //catch (UnauthorizedAccessException) { }
-                    //catch (IOException) { }
+                        ++erasedFileCount;
+                        totalSize -= size.Dequeue();
+                        bgWorker.ReportProgress(0);
+                    }
+                    else
+                        ++failedFiles;
                 }
                 else if (fileSystemInfo is DirectoryInfo)
                 {
-                    DirectoryInfo directoryInfo = (DirectoryInfo)fileSystemInfo;
-
+                    DirectoryInfo folderInfo = (DirectoryInfo)fileSystemInfo;
+                    
                     if (changeName)
-                    {
-                        int attempt = 0;
-                        while (true)
-                        {
-                            string suffix = (attempt == 0) ? "" : attempt.ToString();
+                        Erase.RenameFolderName(folderInfo, changeNameLength);
 
-                            string newPath = Path.Join(directoryInfo.Parent?.FullName, new string('a', directoryInfo.Name.Length) + suffix);
-                            if (!Directory.Exists(newPath))
-                            {
-                                directoryInfo.MoveTo(newPath);
-                                if (!changeNameLength) break;
-                            }
-                            else
-                            {
-                                ++attempt;
-                                continue;
-                            }
-
-                            if (changeNameLength)
-                            {
-                                newPath = Path.Join(directoryInfo.Parent?.FullName, "a" + suffix);
-
-                                if (!Directory.Exists(newPath))
-                                {
-                                    Debug.WriteLine(directoryInfo.FullName, newPath);
-                                    directoryInfo.MoveTo(newPath);
-                                    break;
-                                }
-                                else
-                                    ++attempt;
-                            }
-                        }
-                    }
-
-                    //if (!directoryInfo.EnumerateFileSystemInfos().Any())
-                    //    directoryInfo.Delete();
+                    if (!folderInfo.EnumerateFileSystemInfos().Any())
+                        folderInfo.Delete();
                 }
             }
         }
 
         private void eraseBgWorker_ProgressChanged(object? sender, ProgressChangedEventArgs e)
         {
-            statusLabel.Text = $"Erased {erasedFileCount:n0} out of {fileCount:n0} file{(fileCount == 1 ? "" : "s")}... ({Format.ByteSize(totalSize)} left)";
-            progressBar.Value = (int)((double)erasedFileCount / (double)fileCount * 1000d);
+            updateEraseStatus();
         }
 
         private void eraseBgWorker_RunWorkerCompleted(object? sender, RunWorkerCompletedEventArgs e)
         {
+            checkFailed("erase", "Erased");
+
+            SystemSounds.Beep.Play();
             Close();
         }
     }

@@ -58,9 +58,9 @@
             noteLabel.ForeColor = SystemColors.ControlDark;
             noteLabel.Location = new Point(12, 257);
             noteLabel.Name = "noteLabel";
-            noteLabel.Size = new Size(321, 15);
+            noteLabel.Size = new Size(187, 15);
             noteLabel.TabIndex = 4;
-            noteLabel.Text = "File names, file sizes, and metadata may still be recoverable.";
+            noteLabel.Text = "Metadata may still be recoverable.";
             // 
             // eraseAllButton
             // 
@@ -125,7 +125,7 @@
             Controls.Add(noteLabel);
             Controls.Add(itemsTreeView);
             Icon = (Icon)resources.GetObject("$this.Icon");
-            MinimumSize = new Size(361, 172);
+            MinimumSize = new Size(280, 189);
             Name = "MainForm";
             Text = "File Eraser";
             ResumeLayout(false);
