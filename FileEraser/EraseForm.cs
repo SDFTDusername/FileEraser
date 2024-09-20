@@ -26,7 +26,7 @@ namespace FileEraser
         private bool changeSize = true;
         private bool changeName = true;
         private bool changeNameLength = true;
-        private bool delete = false;
+        private bool delete = true;
 
         public EraseForm(string[] fileNames)
         {
