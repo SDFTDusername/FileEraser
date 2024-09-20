@@ -26,6 +26,7 @@ namespace FileEraser
         private bool changeSize = true;
         private bool changeName = true;
         private bool changeNameLength = true;
+        private bool delete = false;
 
         public EraseForm(string[] fileNames)
         {
@@ -207,7 +208,8 @@ namespace FileEraser
 
                     if (success)
                     {
-                        fileInfo.Delete();
+                        if (delete)
+                            fileInfo.Delete();
 
                         ++erasedFileCount;
                         totalSize -= size.Dequeue();
@@ -223,7 +225,7 @@ namespace FileEraser
                     if (changeName)
                         Erase.RenameFolderName(folderInfo, changeNameLength);
 
-                    if (!folderInfo.EnumerateFileSystemInfos().Any())
+                    if (delete && !folderInfo.EnumerateFileSystemInfos().Any())
                         folderInfo.Delete();
                 }
             }

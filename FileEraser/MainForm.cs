@@ -145,6 +145,7 @@ namespace FileEraser
         private void eraseAllButton_Click(object sender, EventArgs e)
         {
             EraseForm eraseForm = new EraseForm(fileNames.ToArray());
+            eraseForm.StartPosition = FormStartPosition.CenterParent;
 
             if (!eraseForm.Cancelled)
             {
